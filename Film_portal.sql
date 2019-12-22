@@ -1,11 +1,11 @@
--- База курсовой работы на примере Кинопоиск 
 
 
-DROP DATABASE IF EXISTS kinopoisk_test;
-CREATE DATABASE kinopoisk_test; 
-USE kinopoisk_test; 
 
--- список режисеров 
+DROP DATABASE IF EXISTS kinopoisk;
+CREATE DATABASE kinopoisk; 
+USE kinopoiskt; 
+
+-- Cписок режисеров------------------------------ 
 DROP TABLE IF EXISTS directors;
 CREATE TABLE directors ( 
 	id SERIAL PRIMARY KEY,
@@ -14,11 +14,11 @@ CREATE TABLE directors (
 	birthday DATE,
 	gender CHAR(1),
 	
-	INDEX (name)
-	
+	INDEX (name)	
 );
 
--- таблица пользователей c основной информацией 
+
+-- Таблица пользователей c основной информацией 
 DROP TABLE IF EXISTS users; 
 CREATE TABLE users  ( 
 	id SERIAL PRIMARY KEY,
@@ -32,7 +32,18 @@ CREATE TABLE users  (
 	FOREIGN KEY (favorite_director) REFERENCES directors(id) on update cascade 
 	
 );
--- типы жанров для фильмов. 
+
+-- Следим что бы в  БД точно попал хэш пароля----
+DELIMITER //
+CREATE TRIGGER users_insert_trg BEFORE INSERT ON users
+FOR EACH ROW
+BEGIN
+    SET NEW.password_hash = MD5(NEW.password_hash);
+END//
+DELIMITER ;
+
+
+-- Выносим жанры фильмов в отдельную таблицу.
 DROP TABLE IF EXISTS genres_type;
 CREATE TABLE genres_type (
 	id SERIAL PRIMARY KEY,
@@ -41,7 +52,7 @@ CREATE TABLE genres_type (
 );
 
 
--- Основная таблица с фильмами, где есть один основной жанр, и один дополнительный. Оба ссылаются на  таблицу типо
+-- Основная таблица с фильмами, где есть один основной жанр фильма + один дополнительный. 
 DROP TABLE IF EXISTS films;
 CREATE TABLE films ( 
 	id SERIAL PRIMARY KEY,
@@ -61,15 +72,15 @@ CREATE TABLE films (
 );
 
 
--- промежуточная таблица для директоров что бы сделать связь М : М  
+-- промежуточная таблица для директоров  и фильмов что бы сделать связь М : М -- 
 DROP TABLE IF EXISTS directors_films;
 CREATE TABLE directors_films ( 
 		id_director BIGINT UNSIGNED NOT NULL,
 		id_film BIGINT UNSIGNED NOT NULL,
 		
 		PRIMARY KEY (id_director,id_film ),
-		FOREIGN KEY (id_director) REFERENCES directors(id) on update cascade on delete cascade,
-		FOREIGN KEY (id_film) REFERENCES films(id) on update cascade on delete cascade
+		FOREIGN KEY (id_director) REFERENCES directors(id) on update cascade ,
+		FOREIGN KEY (id_film) REFERENCES films(id) on update cascade
 );
 
 -- список фильмов добавленных пользователями в избранное
@@ -80,8 +91,8 @@ CREATE TABLE favorites (
 		to_favorite_time DATETIME NOT NULL ,  
 		
 		PRIMARY KEY (user_id, film_id),
-		FOREIGN KEY (user_id) REFERENCES users(id)on update cascade on delete cascade,
-		FOREIGN KEY (film_id) REFERENCES films(id)on update cascade on delete cascade
+		FOREIGN KEY (user_id) REFERENCES users(id)on update cascade,
+		FOREIGN KEY (film_id) REFERENCES films(id)on update cascade 
 		
 );
 -- Обзоры на фильмы сделанные пользователями.
@@ -104,7 +115,7 @@ CREATE TABLE revisions  (
 			   
 );
 
--- промежуточная таблица для оценок фильма. 
+-- Таблица с оценками фильмов от пользователей. 
 DROP TABLE IF EXISTS scores;
 CREATE TABLE scores (
 	user_score BIGINT UNSIGNED NOT NULL,
@@ -119,6 +130,18 @@ CREATE TABLE scores (
 	INDEX(film_related)
 );
 
+-- Тригер на пересчет общего рейтинга фильма в случае новой оценки  на фильм от любього пользователя.
+DELIMITER \\
+drop trigger if exists `avg_score`  \\
+CREATE TRIGGER `avg_score` AFTER INSERT ON `scores` FOR EACH ROW 
+BEGIN 
+	update films set film_total_score = (select avg(score) from scores where film_related = new.film_related) 
+	where id = new.film_related;
+END
+\\ 
+DELIMITER ; 
+
+
 -- новостные посты от пользователей с статусом модерации поста. 
 DROP TABLE IF EXISTS posts;
 CREATE TABLE posts( 
@@ -130,9 +153,10 @@ CREATE TABLE posts(
 			
 		FOREIGN KEY (author_id) REFERENCES users(id),
 		INDEX(author_id)
-	
 
 );
+
+-- промежуточная таблица связей между новостями и фильмами. 
 
 DROP TABLE IF EXISTS posts_for_films;
 CREATE TABLE posts_for_films ( 
@@ -156,11 +180,11 @@ CREATE TABLE comments(
 	 PRIMARY KEY (author_id,post_id),
 	 FOREIGN KEY (author_id) REFERENCES users(id) on delete cascade,
 	 FOREIGN KEY (post_id) REFERENCES posts(id),
-	 INDEX(post_id)	 
+	 INDEX(author_id)	 
 	 
 );
 
-
+-- дополнительная информация по пользователям. 
 DROP TABLE IF EXISTS profiles;
 CREATE TABLE profiles( 
 	user_id SERIAL PRIMARY KEY,
@@ -174,6 +198,8 @@ CREATE TABLE profiles(
 
 );
 
+
+-- кинотеатры. 
 DROP TABLE IF EXISTS cinema;
 CREATE TABLE cinema ( 
 	id SERIAL PRIMARY KEY,
@@ -184,6 +210,7 @@ CREATE TABLE cinema (
 	
 );
 
+-- таблица с информацией по актерам. 
 DROP TABLE IF EXISTS actors ;
 CREATE TABLE actors (
 	id SERIAL primary key, 
@@ -191,6 +218,8 @@ CREATE TABLE actors (
 	date_of_birth DATE, 
 	bio TEXT );
 
+
+-- связь между актерами и фильмами. 
 drop table if exists acotor_films; 
 create table acotor_films( 
 		actor_id BIGINT unsigned not null, 
@@ -201,6 +230,7 @@ create table acotor_films(
 		
 );
 
+-- связь между новостными постами и актерами,
 drop table if exists posts_for_actors;
 create table posts_for_actors (
 	post_id BIGINT unsigned not null, 
@@ -242,14 +272,13 @@ FROM films as f
 
 order by  g.`type`, s.score DESC;
 
--- представление скопировано из dbeaver  так как сходный код не сохранился. 
--- суть в выборке постов в которых указано кто делал посты, и на каких акторов + фильмы там есть ссылки. 
+-- суть в выборке постов ( новостей)  в которых указано кто делал посты, с указанием актеров и фильмов в этом посте. 
 create or replace view `posts_test` as
 select
-    `f`.`film_name` as `Film name`,
-    `ac`.`full_name` as `Actor`,
-    `u`.`nickname` as `user nickname`,
-    `p`.`body` as `News post`
+    f.film_name as Film name,
+    ac.full_name as Actor,
+    u.nickname as user nickname,
+    p.body as News post
 from
     (((((`posts` `p`
 join `posts_for_films` `pf` on
@@ -267,53 +296,13 @@ where
 group by
     `p`.`body`;
 
--- тригер на подсчет среднего бала фильма при добавлении новых оценок от пользователей.
-DELIMITER \\
-drop trigger if exists `avg_score`  \\
-CREATE TRIGGER `avg_score` AFTER INSERT ON `scores` FOR EACH ROW 
-BEGIN 
-	update films set film_total_score = (select avg(score) from scores where film_related = new.film_related) 
-	where id = new.film_related;
-END
-\\ 
-DELIMITER ; 
 
-
--- Пример функции рекомендации пользователю фильмов по вкусу. 
--- Логика: у каждого пользователя есть один любимый режиссер, по этому критерию подбираются пользователи  
--- у котрых такой же любимый режиссер как и  выбранного. После чего рассматриваются флиьмы которым эти пользователи 
--- хорошие оценки и выдаются изначальному пользователю. 
-
--- не работает в рамках функции ссылкается что выдача большой одной строки. Но без функции все работает. 
--- нужна помощь.  Пример без функции внизу. 
-
-DELIMITER \\ 
-DROP PROCEDURE IF EXISTS set_x \\
-CREATE PROCEDURE set_x ( id INT)
-BEGIN
-  SET @x = id;
-   select film_name 
-	from films f 
-	join scores s on s.film_related = f.id
-	join users u on u.id = s.user_score
-	where u.id = (select u.id 
-		from users as u 
-		join directors as d on u.favorite_director = d.id
-		where u.favorite_director = (select favorite_director from users where id = @x) and u.id <> @x 
-		order by rand() limit 1)  
-	and s.score > 5 
-	order by rand() limit 1;
- 
-END\\
-DELIMITER ; 
-
--- call set_x(1);
-
-
--- как пример не функции это работает, и даже возвращает не больше чем 1 строку. 
-
-/*
- * select film_name 
+/* выборка где пользователю предлагаются фильмы по его вкусу. 
+ * поиск пользователей у которых такой-же  любимый режиссер  >
+ * поиск фильмов которые оценили эти пользователи с высоким балом. 
+ */
+   
+select film_name 
 from films f 
 	join scores s on s.film_related = f.id
 	join users u on u.id = s.user_score
@@ -321,9 +310,9 @@ where u.id = (select u.id
 		from users as u 
 		join directors as d on u.favorite_director = d.id
 		where u.favorite_director = (select favorite_director from users where id = 1) and u.id <> 1 
-		order by rand() limit 1)  and s.score > 5 
-order by rand() limit 1;
- */
+		order by rand() limit 1)  and s.score > 7
+order by rand(); 
+
 
 
 

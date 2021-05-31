@@ -1,6 +1,6 @@
 
 
-
+-- Удалить если есть. 
 DROP DATABASE IF EXISTS kinopoisk;
 CREATE DATABASE kinopoisk; 
 USE kinopoiskt; 
